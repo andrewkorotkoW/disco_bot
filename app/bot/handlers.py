@@ -16,6 +16,7 @@ from app.ai import advise, extract_ticket
 from app.ai.schemas import AdviceResponse, TicketExtraction
 from app.cases import Case, CaseStore, Decision
 from app.logs import LogSource, NullLogSource
+from app.logs.facts import build_log_facts, resolve_time_window
 
 SimilarCase = tuple[Case, Optional[Decision], float, str]
 
@@ -74,7 +75,11 @@ def analyze_ticket(
         item for item in store.find_similar(ticket.text, k=k_similar) if item[0].id != case.id
     ]
 
-    log_facts = log_source.query(player=extraction.player_name or ticket.player_name)
+    since, until = resolve_time_window(extraction.time_hint)
+    log_extraction = extraction.model_copy(
+        update={"player_name": extraction.player_name or ticket.player_name}
+    )
+    log_facts = build_log_facts(log_extraction, log_source, since=since, until=until)
 
     advice = advise(extraction, similar, log_facts, client=ai_client)
 
