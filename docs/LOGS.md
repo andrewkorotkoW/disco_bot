@@ -22,7 +22,7 @@
 ```
 Player "Kazah" (id=rsYnQ...H24=) is connecting
 Player "Kazah" (id=rsYnQ...H24= pos=<4619.9, 8300.5, 323.5>) is connected
-Player "Nomad" (id=76561198235170772 pos=<-3.4e38, ...>) has been disconnected      # на дисконнекте id = steam64, pos мусор
+Player "Nomad" (id=7656119XXXXXXXXXX pos=<-3.4e38, ...>) has been disconnected      # на дисконнекте id = steam64, pos мусор
 Player "Multik" (id=... group=22 faction="Zalupa" pos=<...>)[HP: 85.7] hit by Зараженный into Torso(1) for 6.175 damage (MeleeInfected)
 Player "X" (id=...)[HP: N] hit by Player "Y" (id=...) into LeftArm(18) for N damage ...   # PvP-урон на PVE-сервере!
 Player "X" (id=...)[HP: N] hit by FallDamageHealth | FireplaceFireBarrel with FireDamage
@@ -46,9 +46,9 @@ infected/player/ai/fall/fire), `kill`, `death`, `suicide`, `bleed_out`, `unconsc
 Строка: ` H:MM:SS <текст>` (без ведущего нуля). Полезное:
 
 ```
-BattlEye Server: Player #0 Balabaster (94.29.21.212:3578) connected
-BattlEye Server: Player #0 Balabaster - BE GUID: e8b4...8f
-Player "Balabaster" (steamID=76561198272357570 pos=<...>) is connected
+BattlEye Server: Player #0 Balabaster (IP:PORT) connected
+BattlEye Server: Player #0 Balabaster - BE GUID: <hex32>
+Player "Balabaster" (steamID=7656119XXXXXXXXXX pos=<...>) is connected
 [StateMachine]: Player espanol (dpnid N uid rql2k...) ...
 ```
 
@@ -84,7 +84,7 @@ Kinds: `admin_action` (teleport, spawn, delete, esp, invisible, …), `join`, `l
 Служебные блоки:
 ```
 [..] - HH;MM;SS - Список игроков:
-Игрок: Balabaster (ID: 76561198272357570), Местоположение: <7609.4, 205.4, 13458.6> - , Время в игре: 0 д. 4 ч. 17 м.
+Игрок: Balabaster (ID: 7656119XXXXXXXXXX), Местоположение: <7609.4, 205.4, 13458.6> - , Время в игре: 0 д. 4 ч. 17 м.
 ...
 [..] - HH;MM;SS !!!предмет был перемещён между двумя контейнерами посмотри по координатам списка игроков, кто был ближе к событию!!! <детали>
 ```
@@ -96,7 +96,7 @@ Kinds: `admin_action` (teleport, spawn, delete, esp, invisible, …), `join`, `l
 ## 5. `CarCodeLock_YYYY-MM-DD_HH-MM.log`
 
 ```
-[2026-11-08 04:04:20] [INFO] [CarCodeLock] Player: '76561198125565999', open transport: 'CrSk_UAZ_469', on position: 'x y z'
+[2026-11-08 04:04:20] [INFO] [CarCodeLock] Player: '7656119XXXXXXXXXX', open transport: 'CrSk_UAZ_469', on position: 'x y z'
 [...] close transport: ...
 ```
 Kinds: `vehicle_open`, `vehicle_close`. Вместе с ZF `сел в/вышел из` — тикеты про угон.
