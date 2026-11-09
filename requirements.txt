@@ -1,2 +1,7 @@
+discord.py
 anthropic
 pydantic
+sentence-transformers
+python-dotenv
+pytest
+pytest-asyncio
