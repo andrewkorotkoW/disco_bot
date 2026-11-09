@@ -1,0 +1,17 @@
+AdminLog started on 2026-11-09 at 23:58:00
+23:58:01 | Player "Kazah" (id=XWbcLXGVWt0G+XNh2Z0Tor+ONhXjzVy6Gqg/wBGhePc=) is connecting
+23:58:02 | Player "Kazah" (id=XWbcLXGVWt0G+XNh2Z0Tor+ONhXjzVy6Gqg/wBGhePc= pos=<4619.9, 8300.5, 323.5>) is connected
+23:58:05 | Player "Multik" (id=82pZh8Eu13gGC3vUbtz0TQziY3LgA4BB2dHpXFavmOY= group=22 faction="Zalupa" pos=<4700.1, 8290.2, 320.0>)[HP: 85.7] hit by Зараженный into Torso(1) for 6.175 damage (MeleeInfected)
+23:58:10 | Player "XVictim" (id=C27iX/pWSVrkg0fdMqvV02edV4bgifMyzdymDtPGC8c= pos=<100.0, 200.0, 10.0>)[HP: 55.2] hit by Player "YAttacker" (id=tvMsYVfFyeFnKKPeveVvMlIRppUhvfqFB2lrH2MFwTA=) into LeftArm(18) for 12.5 damage (Mlock-91)
+23:58:15 | Player "X2Fall" (id=D3qEZx5U7dsBSKJGjnYuoRWwBtP6GoNX8mlLDjRx7Vs= pos=<50.0, 60.0, 5.0>)[HP: 40.0] hit by FallDamageHealth
+23:58:20 | Player "X3Fire" (id=rD/+XtKjnB3DQUi7AE9geLKKMw/Vx3zCclisgGufw4s= pos=<10.0, 20.0, 1.0>)[HP: 30.0] hit by FireplaceFireBarrel with FireDamage
+23:58:25 | AI "Maria" (DEAD) (group=37:"SZPlane_Raiders_1" faction="Raiders" pos=<300.0, 400.0, 20.0>) killed by Player "Nomad" (id=6LyNbH6hh18rdqk+R9XE35lliz5JXW8MlGBL142B7Tw= group=26 faction="Zalupa" pos=<305.0, 402.0, 19.5>) with Mlock-91 from 13.95
+23:58:30 | Player "Gospod" (DEAD) (id=9TR+s/xG4D6m97rU/beCGonlitsLh2EAOeyHqYN9PCM=) killed by ZmbF_VillagerOld_Red
+23:58:35 | Player "kuwalda" (DEAD) (id=YDi1DiVa6OhawyboOTK0Jhsv96VeG+OmfjE382t1s1k=) died. Stats> Water: 3335 Energy: 4780 Bleed sources: 0
+23:58:40 | Player "kuwalda" (DEAD) (id=YDi1DiVa6OhawyboOTK0Jhsv96VeG+OmfjE382t1s1k=) bled out
+23:58:45 | Player "CMETAHA" (id=TpcpJ8IGVE+AGV5dZ1IXvyce76JmMIq4xHIhK+ucK+I= ) committed suicide
+23:58:50 | Player "RespawnGuy" (DEAD) (id=LIDHjpIIGxVmGVkeOx7Kjxq0AiCcywyCpxX3g6DOTvw=) is choosing to respawn
+23:58:55 | AI "Eva" (group=37:"SZPlane_Raiders_1" faction="Raiders" pos=<310.0, 410.0, 20.0>) is unconscious
+23:59:58 | [Chat - Global]("Nomad"(id=bD3lrt624srPIrRnXfnasVYt9x1FTSPFC5B1xWeNLTQ=)): привет всем
+00:00:05 | Player "Nomad" (id=76561199000000011 pos=<-3.4e38, 0, 0>) has been disconnected
+00:00:10 | [UpdateCheck] All LBmaster mods are up to date !
