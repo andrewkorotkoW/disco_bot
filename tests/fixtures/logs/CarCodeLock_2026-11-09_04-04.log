@@ -1,2 +1,3 @@
 [2026-11-09 04:04:20] [INFO] [CarCodeLock] Player: '76561199000000041', open transport: 'CrSk_UAZ_469', on position: '7609.4 13458.6 205.4'
 [2026-11-09 04:10:00] [INFO] [CarCodeLock] Player: '76561199000000041', close transport: 'CrSk_UAZ_469', on position: '7610.0 13459.0 206.0'
+совершенно мусорная строка, не похожая на формат CarCodeLock
