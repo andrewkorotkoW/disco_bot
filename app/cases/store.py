@@ -172,6 +172,10 @@ class CaseStore:
         ).fetchone()
         return _row_to_decision(row) if row else None
 
+    def get_decision(self, case_id: int) -> Optional[Decision]:
+        """Последнее решение по кейсу, если оно уже принято."""
+        return self._latest_decision(case_id)
+
     def resolve_case(self, case_id: int, admin_id: int, decision_text: str) -> Decision:
         case = self.get_case(case_id)
         if case is None:
