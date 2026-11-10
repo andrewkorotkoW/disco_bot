@@ -24,15 +24,16 @@ Player "Kazah" (id=rsYnQ...H24=) is connecting
 Player "Kazah" (id=rsYnQ...H24= pos=<4619.9, 8300.5, 323.5>) is connected
 Player "Nomad" (id=7656119XXXXXXXXXX pos=<-3.4e38, ...>) has been disconnected      # на дисконнекте id = steam64, pos мусор
 Player "Multik" (id=... group=22 faction="Zalupa" pos=<...>)[HP: 85.7] hit by Зараженный into Torso(1) for 6.175 damage (MeleeInfected)
-Player "X" (id=...)[HP: N] hit by Player "Y" (id=...) into LeftArm(18) for N damage ...   # PvP-урон на PVE-сервере!
+Player "X" (id=...)[HP: N] hit by Player "Y" (id=... group=26 faction="Zalupa") into LeftArm(18) for N damage (ammo) with Mlock-91 from 13.95 meters    # PvP-урон на PVE-сервере; "meters" с trailing space — реальный формат!
 Player "X" (id=...)[HP: N] hit by FallDamageHealth | FireplaceFireBarrel with FireDamage
 Player "CMETAHA" (id=... ) committed suicide
 Player "Gospod" (DEAD) (id=...) killed by ZmbF_VillagerOld_Red
 Player "kuwalda" (DEAD) (id=...) died. Stats> Water: 3335 Energy: 4780 Bleed sources: 0
 Player "kuwalda" (DEAD) (id=...) bled out
 Player "X" (DEAD) (id=...) is choosing to respawn
-AI "Maria" (DEAD) (group=37:"SZPlane_Raiders_1" faction="Raiders" pos=<...>) killed by Player "Nomad" (id=... group=26 faction="Zalupa" pos=<...>) with Mlock-91 from 13.95
+AI "Maria" (DEAD) (group=37:"SZPlane_Raiders_1" faction="Raiders" pos=<...>) killed by Player "Nomad" (id=... group=26 faction="Zalupa" pos=<...>) with Mlock-91 from 13.95 meters
 AI "Eva" (group=37:"..." faction="Raiders" pos=<...>) is unconscious | regained consciousness | turned hostile to ...
+Player "Y" (id=... group=5 faction="..." pos=<...>) is unconscious | regained consciousness    # то же состояние бывает и у игрока, не только у AI
 [Chat - Global]("Nomad"(id=...)): текст сообщения
 [UpdateCheck] All LBmaster mods are up to date !
 ```
@@ -40,6 +41,12 @@ AI "Eva" (group=37:"..." faction="Raiders" pos=<...>) is unconscious | regained 
 Виды событий (kinds) для парсера: `connect`, `disconnect`, `hit` (с подтипами
 infected/player/ai/fall/fire), `kill`, `death`, `suicide`, `bleed_out`, `unconscious`,
 `respawn`, `chat`. В каждой строке с игроком: имя, id (BI-hash), group, faction, pos, HP.
+
+`hit`/`kill` несут `extra['attacker_kind']` (`player`/`ai`/`infected`/`fall`/`fire`/`env`) —
+кто ударил/убил; для `hit` это дубль `extra['subtype']` (оставлен для старых тестов), для
+`kill` поле новое. `unconscious` различает игрока и AI через `extra['subject_type']`
+(`player`/`ai`) и несёт `extra['state']` (`unconscious`/`regained consciousness`) — у
+`regained` в логе нет слова "is", в отличие от `is unconscious`.
 
 ## 2. `server_console.log` — консоль сервера
 
@@ -69,8 +76,29 @@ Player "Balabaster" (steamID=7656119XXXXXXXXXX pos=<...>) is connected
 [INFO ] [AdminTools] Received Watchlist/Banlist from webserver   # шум, каждую минуту
 ```
 
-Kinds: `admin_action` (teleport, spawn, delete, esp, invisible, …), `join`, `leave`,
-`chest_open`. Нужен для тикетов «админ спавнил/телепортился», «кто открыл сейф».
+Virtual Garage/Loot Chests — реальные форматы (выяснены по живым логам владельца, а не
+придуманы заранее):
+```
+[ADMIN] [VirtualGarage] Vehicle Stored: Bastard_cj7_green by dimonbigboy (76561198...) at <8090.1, 458.9, 9330.9> TraderID: 0 Had Insurance: false Insurance Value: 0
+[ADMIN] [VirtualGarage] Vehicle Restored: Bastard_cj7_green by dimonbigboy (76561198...) at <8090.1, 458.9, 9330.9> TraderID: 0 VehicleUID: 2004113087 Infinite ? false. Vehicle was in Garage for 2 h 30 min Insurance: false Value: 0
+[ADMIN] [VirtualGarage] New Public Garage was placed by Irina Drakylina (76561198...) at <x, y, z> GarageID: 17
+[ADMIN] [VirtualGarage] Admin Trader was deleted by Irina Drakylina (76561198...) at <x, y, z> UID: 9
+[INFO ] [LootChests] Player Per_Duck (76561198...) opened chest at <x, y, z> with ExpansionCodeLockKit Successrate: 0.42 Rand: 0.31
+[ADMIN] [LootChests] Player Per_Duck (76561198...) successfully opened chest ExpansionSafeBig for Safe big at <x, y, z>
+```
+`Vehicle Stored` **не содержит `VehicleUID`** — оно есть только у `Restored`; это
+свойство реального лога, а не пропуск в парсере (`garage_store` без ID машины —
+`upsert_vehicle` на нём не пишет строку в таблицу `vehicles`). Слово перед
+`Stored`/`Restored` не всегда "Vehicle" (бывает и "Bike") — регекс не привязан к нему.
+
+Kinds: `join`, `leave`, `admin_action` (подтипы `teleport`/`spawn`/`delete`/`esp`/
+`invisible`/`clear_inventory` в `extra['subtype']`), `chest_open` (подтипы
+`attempt`/`success` в `extra['subtype']`; у `attempt` — `pos`/`tool`/`successrate`/`rand`,
+у `success` — `pos`/`chest_name`/`chest_config`), `garage_store`/`garage_restore`
+(`vehicle_class`, `trader_id`, `pos`; у `garage_restore` ещё `vehicle_uid`,
+`in_garage_for`, `infinite`, `insurance`, `value`), `garage_placed`/`garage_deleted`
+(`pos`, `garage_id`/`uid`). Нужен для тикетов «админ спавнил/телепортился», «кто открыл
+сейф», «кто ставил/убирал машину в гараж».
 
 ## 4. `zfbubusik_log-[DD-MM-YYYY] - HH;MM;SS.log` — действия с предметами (мод ZF)
 
@@ -80,6 +108,37 @@ Kinds: `admin_action` (teleport, spawn, delete, esp, invisible, …), `join`, `l
 `сел в <машина> , x,y,z`, `вышел из`, `выполнил действие <…>` (напр. «Завести двигатель»),
 `получил урон от`, `получил порез`, `заразился болезнью`, `выздоровел от болезни`,
 `потерял сознание`, `был убит`. Субъект `Неизвестно Неизвестно` — ИИ/неигрок.
+
+`item_action`/`container_move` разбирают хвост строки на цепочки контейнеров
+(`src_chain`/`dst_chain`, путь вида `Персонаж (X) -> Одежда (Y)`, звенья разделены
+` -> `) и берут из них `src_root_class`/`dst_root_class` — класс **корня** цепочки
+(машина/игрок/мебель), а не любое звено пути; именно по корню, а не по подстроке во всей
+цепочке, отличается «предмет из машины» от «предмет из сумки в машине». Готовый
+читаемый `text`/`raw` события — исходная строка целиком, с глаголом (переместил/
+подобрал/взял/положил/повесил/снял/бросил) и названием предмета, его не нужно
+пересобирать из `extra` для показа в разборе тикета.
+
+Машины дублируют появление/исчезновение в мире (не только посадку/высадку):
+```
+Транспортное средство Bastard_cj7_green (ID: 55) инициализировано по координатам 8090.1,458.9,9330.9
+Транспортное средство Bastard_cj7_green (ID: 55) исчезло из игрового мира по координатам 8090.1,458.9,9330.9
+```
+Kinds `vehicle_spawn`/`vehicle_despawn`, `extra['vehicle_class']`/`['vehicle_id']`/
+`['pos']`. "исчезло" на координатах гаража = машину убрали в Virtual Garage (даже без
+LBmaster-лога), "инициализировано" в начале сессии = машина просто стояла в мире на
+рестарте (см. «Уроки разбора...» ниже).
+
+`death` (`был убит...`) разбирает хвост, когда формат строки это позволяет:
+`extra['killer_kind']` (`player`/`bot`/`env`), `killer_name`, `killer_steam64` (только
+для `player`), `weapon`, `cause` (сырой текст «Причина смерти»), `distance`, `pos`
+(позиция жертвы). Пример:
+```
+[09-11-2026] - 16;28;00 Paul Piski 76561198000000099 был убит. Игрок: Nomad (76561198000000001) с Mlock-91, Расстояние: 13.95 м., Причина смерти: Соскучился по пляжу, Позиция жертвы: 100.0,200.0,300.0
+```
+Убийцу-бота отличает `Бот EAi: <имя> с <оружие>` (`killer_kind=bot`, без steam64).
+«Причина смерти» здесь — не название оружия: `Соскучился по пляжу` и похожие фразы —
+ярлык обычной смерти/кровопотери без убийцы (суицид либо истёк кровью), см. «Боты...»
+ниже.
 
 Служебные блоки:
 ```
@@ -108,6 +167,25 @@ Kinds: `vehicle_open`, `vehicle_close`. Вместе с ZF `сел в/вышел
   скриптов; `info_*/script_*` — старт модов. Полезны только для тикетов «сервер упал/лагает».
 - `connection_log*`, `stats_log.txt`, `system*.txt`, `appinfo_log.txt`, `configstore_log.txt` — Steam-шум.
 
+## Соглашение о времени
+
+Все парсеры (`app/logs/*.py`) кладут в `LogEvent.ts` **naive** `datetime` в местном
+времени сервера (МСК), без `tzinfo` — ровно то, что написано в строке лога. Индекс
+(`SqliteLogSource`) хранит и сравнивает `ts` как есть, без привязки к UTC.
+
+`app/logs/facts.py` (`resolve_time_window`/`_parse_time_hint`, используются из
+`app/bot/handlers.py` для вычисления окна `since`/`until` вокруг времени инцидента)
+следуют тому же соглашению и тоже работают с naive local time. Раньше
+`resolve_time_window` возвращал aware `datetime` с `tzinfo=timezone.utc`; при сравнении
+с naive `ts` в индексе (ISO-строка с `+00:00` против строки без пояса) получался сдвиг —
+это исправлено: теперь всё время в модуле naive. При сборке собственных окон/фильтров по
+времени нужно строить `datetime(...)` без `tzinfo`, а не `datetime.now(timezone.utc)`.
+
+Переменная `SERVER_TZ` (по умолчанию `Europe/Moscow`, читается в `app/logs/facts.py`)
+называет, какой часовой пояс имеется в виду под «местным временем» — чисто для справки
+в коде; сама конвертация времени по ней не делается (конвертации нет вовсе — везде один
+и тот же пояс). В `.env.example` переменная не заведена.
+
 ## Идентичности игрока
 
 | Источник | Идентификатор |
@@ -126,7 +204,7 @@ Kinds: `vehicle_open`, `vehicle_close`. Вместе с ZF `сел в/вышел
 
 | Тип тикета | Источники | Запрос |
 |---|---|---|
-| «Пропал лут из базы/ящика» | ZF (переместил/подобрал/взял + `!!!` + Список игроков), LBmaster chest_open | предметы в радиусе от координат ± окно времени, ближайшие игроки по списку |
+| «Пропал лут из базы/ящика» | ZF (переместил/подобрал/взял + `!!!` + Список игроков), LBmaster chest_open; `container_access(класс)` в индексе (`app/logs/sqlite_source.py`) — кто брал/клал по корню цепочки контейнеров | предметы в радиусе от координат ± окно времени, ближайшие игроки по списку; CLI `python -m app.logs container <класс>` для ручной проверки |
 | «Меня убил игрок на PVE» | ADM `hit by Player`, `killed by Player` | по жертве/атакующему ± 10 мин, дистанция, оружие |
 | «Угнали машину» | CarCodeLock, ZF `сел в/вышел из`, ZF `Завести двигатель` | по типу машины/координатам ± окно |
 | «Админ абьюзит» | LBmaster admin_action | по админу ± окно |
