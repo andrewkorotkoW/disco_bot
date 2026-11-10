@@ -105,13 +105,20 @@ def test_player_key_falls_back_to_player_id_when_name_missing():
 
 
 # --- агрегация/лимит -----------------------------------------------------------
+#
+# НАЙДЕНО (тест, не код): _extraction() по умолчанию ставит category="loot_loss",
+# что до разделения build_log_facts по категории (commit 9ba8595/4d4a9e5) было не
+# важно, а теперь уводит в _build_loot_loss_facts, где .events/.offline_windows/
+# .nearby_players/.vehicle не заполняются вовсе (это поля _build_timeline_facts).
+# Ниже -- тесты именно общего таймлайна, им нужна category из ("bug","other",
+# "ban_appeal"), иначе они проверяют пустые списки "случайно верно".
 
 
 def test_events_at_or_below_limit_are_rendered_one_line_each_even_if_repeated():
     events = [_hit_event(_t(i)) for i in range(5)]  # все одного типа, но 5 <= MAX_EVENTS
     source = FakeSource(events=events)
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert len(facts.events) == 5
 
@@ -121,7 +128,7 @@ def test_events_above_limit_aggregate_repeated_kind_label_into_counted_line():
     events = [_hit_event(_t(i)) for i in range(n)]
     source = FakeSource(events=events)
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert len(facts.events) == 1
     assert f"×{n}" in facts.events[0]
@@ -133,7 +140,7 @@ def test_events_above_limit_keeps_distinct_kinds_separate_and_respects_limit():
     other = LogEvent(ts=_t(9999), kind="chat", player="Victim", player_id=None, text="привет", raw=None)
     source = FakeSource(events=zombie_hits + [other])
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert len(facts.events) <= MAX_EVENTS
     assert any("×" in line for line in facts.events)
@@ -146,7 +153,7 @@ def test_events_above_limit_keeps_distinct_kinds_separate_and_respects_limit():
 def test_offline_windows_are_formatted_into_facts():
     source = FakeSource(offline_windows=[(_t(0), _t(60))])
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert len(facts.offline_windows) == 1
     assert "offline" in facts.offline_windows[0]
@@ -160,7 +167,7 @@ def test_nearby_players_use_latest_known_position_from_events():
     ]
     source = FakeSource(events=events, nearby_players=[{"player": "Suspect", "distance": 5.0, "ts": _t(10)}])
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert source.nearby_players_calls == [(3.0, 4.0, 50.0, _t(10))]  # самая свежая позиция, не первая
     assert any("Suspect" in line for line in facts.nearby_players)
@@ -169,7 +176,7 @@ def test_nearby_players_use_latest_known_position_from_events():
 def test_no_nearby_players_call_when_no_position_known():
     source = FakeSource(events=[LogEvent(ts=_t(0), kind="chat", player="Victim", player_id=None, text="hi", raw=None)])
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert source.nearby_players_calls == []
     assert facts.nearby_players == []
@@ -182,7 +189,7 @@ def test_vehicle_field_aggregates_vehicle_classes_with_counts():
     ]
     source = FakeSource(events=events)
 
-    facts = build_log_facts(_extraction(), source)
+    facts = build_log_facts(_extraction(category="bug"), source)
 
     assert facts.vehicle == "CrSk_UAZ_469 (×2)"
 
@@ -206,7 +213,10 @@ def test_resolve_time_window_centers_on_parseable_time_hint():
 
     since, until = resolve_time_window("2026-11-09 23:40:00", now=now)
 
-    center = datetime(2026, 11, 9, 23, 40, tzinfo=timezone.utc)
+    # time_hint без явного offset -> _parse_time_hint возвращает naive datetime
+    # (единое соглашение о naive местном времени для всего app/logs, см. докстринг
+    # facts.py) независимо от того, aware ли был передан "now".
+    center = datetime(2026, 11, 9, 23, 40)
     assert since == center - timedelta(hours=2)
     assert until == center + timedelta(hours=2)
 
@@ -242,6 +252,10 @@ def test_resolve_time_window_falls_back_to_now_when_hint_missing():
     ),
 )
 def test_nearby_players_fact_excludes_the_ticket_subject_themselves():
+    # category="bug" -- иначе (см. category-split, commit 9ba8595) build_log_facts
+    # уходит в _build_loot_loss_facts, которая вообще не вызывает nearby_players(),
+    # и тест "проходит" вслепую (facts.nearby_players всегда [] по другой причине),
+    # маскируя сам дефект вместо того, чтобы его демонстрировать.
     events = [LogEvent(ts=_t(0), kind="roster", player="Victim", player_id=None, text="r", raw=None, x=1.0, z=2.0)]
     source = FakeSource(
         events=events,
@@ -251,7 +265,7 @@ def test_nearby_players_fact_excludes_the_ticket_subject_themselves():
         ],
     )
 
-    facts = build_log_facts(_extraction(player_name="Victim"), source)
+    facts = build_log_facts(_extraction(player_name="Victim", category="bug"), source)
 
     assert not any("рядом игрок Victim " in line for line in facts.nearby_players)
 
@@ -273,6 +287,8 @@ def test_event_line_mentions_actor_even_when_parser_text_omits_the_name():
     )
     source = FakeSource(events=[event])
 
-    facts = build_log_facts(_extraction(player_name="76561199000000041"), source)
+    # category="bug" -- иначе facts.events всегда [] (поле _build_timeline_facts),
+    # и assert ниже падал бы по категории, а не по реальному дефекту _event_line.
+    facts = build_log_facts(_extraction(player_name="76561199000000041", category="bug"), source)
 
     assert any("76561199000000041" in line for line in facts.events)
