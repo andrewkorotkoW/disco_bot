@@ -149,6 +149,13 @@ LBmaster, ZF, CarCodeLock), координат и идентичности иг�
 - `LOG_DB_PATH` — путь к SQLite-индексу логов (`app/logs/index.py`), по умолчанию
   `data/logs.db`.
 
+Не заведена в `.env.example`, но читается кодом:
+
+- `SERVER_TZ` — часовой пояс сервера (по умолчанию `Europe/Moscow`), только для справки
+  в `app/logs/facts.py`. Все `ts` в индексе и в окнах `since`/`until` — naive local time,
+  без привязки к UTC; конвертации по `SERVER_TZ` нет (см. соглашение о времени в
+  `docs/LOGS.md`).
+
 ### CLI (`python -m app.logs`)
 
 ```bash
@@ -164,6 +171,10 @@ LBmaster, ZF, CarCodeLock), координат и идентичности иг�
 # 2026-11-09T04:10:00 [vehicle_open] ...
 # всего событий: N
 
+.venv/bin/python -m app.logs container BRDK_PersonalChest_Blue --since 2026-11-09T00:00:00
+# 2026-11-09T04:12:00 [item_action] dimonbigboy: ... положил ...
+# всего событий: N; брали/класли: dimonbigboy
+
 .venv/bin/python -m app.logs near 8090.1 9330.9 50 --at 2026-11-09T04:07:00 --window 10
 # Nomad (76561198...) — 12.3 м, 2026-11-09T04:05:00
 # всего игроков рядом: N
@@ -173,7 +184,10 @@ LBmaster, ZF, CarCodeLock), координат и идентичности иг�
 `files`, парсится заново только если что-то изменилось. `player` принимает ник,
 steam64 или BI-hash — одного и того же игрока сводит резолвер идентичностей
 (`app/logs/identity.py`) по таблице `identities`, которая наполняется коннектами из
-ADM/console/LBmaster.
+ADM/console/LBmaster. `container` ищет, кто брал/клал предметы в контейнер или машину
+заданного класса (ZF `item_action`/`container_move`, в том числе действия ботов —
+`extra['actor_class']`), по корню цепочки контейнеров (`src_root_class`/`dst_root_class`,
+подробности в `docs/LOGS.md`), а не по подстроке во всей цепочке.
 
 ### Что не индексируется
 
