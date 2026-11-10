@@ -24,7 +24,7 @@ def test_ingest_parses_all_five_fixture_files(db_path):
 
     assert stats["files_parsed"] == 5
     assert stats["files_skipped"] == 0
-    assert stats["events"] == 48
+    assert stats["events"] == 60
 
 
 def test_ingest_populates_events_table_with_expected_sources_and_kinds(db_path):
@@ -36,8 +36,8 @@ def test_ingest_populates_events_table_with_expected_sources_and_kinds(db_path):
         for row in rows:
             by_source[row["source"]] = by_source.get(row["source"], 0) + 1
 
-        assert len(rows) == 48
-        assert by_source == {"adm": 14, "console": 3, "lbmaster": 11, "zf": 18, "carcodelock": 2}
+        assert len(rows) == 60
+        assert by_source == {"adm": 20, "console": 3, "lbmaster": 14, "zf": 21, "carcodelock": 2}
 
         kinds = {row["kind"] for row in rows}
         assert "roster" in kinds
@@ -114,7 +114,7 @@ def test_ingest_populates_vehicles_table(db_path):
 
 def test_ingest_is_idempotent_on_repeated_run_same_directory(db_path):
     stats1 = ingest(FIXTURES_DIR, db_path=db_path)
-    assert stats1["events"] == 48
+    assert stats1["events"] == 60
 
     with LogIndex(db_path) as index:
         files_before = {
@@ -135,7 +135,7 @@ def test_ingest_is_idempotent_on_repeated_run_same_directory(db_path):
         event_count_after = index.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
     assert files_after == files_before
-    assert event_count_after == event_count_before == 48
+    assert event_count_after == event_count_before == 60
 
 
 def _make_appendable_copy(tmp_path) -> Path:

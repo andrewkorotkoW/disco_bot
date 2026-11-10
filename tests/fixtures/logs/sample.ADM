@@ -15,4 +15,10 @@ AdminLog started on 2026-11-09 at 23:58:00
 23:59:58 | [Chat - Global]("Nomad"(id=bD3lrt624srPIrRnXfnasVYt9x1FTSPFC5B1xWeNLTQ=)): привет всем
 00:00:05 | Player "Nomad" (id=76561199000000011 pos=<-3.4e38, 0, 0>) has been disconnected
 00:00:10 | [UpdateCheck] All LBmaster mods are up to date !
+00:00:15 | Player "SleepyGuy" (id=QsU8h0qYQNVVz6npAHhNqUEVVoqUYxXF1234ABCD= group=5 faction="Zalupa" pos=<60.0, 70.0, 2.0>) is unconscious
+00:00:20 | Player "SleepyGuy" (id=QsU8h0qYQNVVz6npAHhNqUEVVoqUYxXF1234ABCD= group=5 faction="Zalupa" pos=<60.0, 70.0, 2.0>) regained consciousness
+00:00:25 | Player "X4Ai" (id=aB3dEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEFG= pos=<400.0, 500.0, 10.0>)[HP: 72.0] hit by AI "WolfBot" (group=40:"WildlifePack" faction="Wildlife" pos=<405.0, 505.0, 10.0>) into Torso(1) for 8.5 damage
+00:00:30 | Player "X5Env" (id=hJ9kLmNoPqRsTuVwXyZ0123456789ABCDEFGHIJKLMN= pos=<10.0, 10.0, 1.0>)[HP: 90.0] hit by StaticObjectDamage
+00:00:35 | Player "X6KilledByAi" (DEAD) (id=opQrStUvWxYz0123456789ABCDEFGHIJKLMNOPQRSTU=) killed by AI "WolfBot" (group=40:"WildlifePack" faction="Wildlife" pos=<410.0, 510.0, 10.0>)
+00:00:40 | Player "X7KilledByEnv" (DEAD) (id=vWxYz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZab=) killed by ExplosionTrap
 ### совершенно мусорная строка без метки времени ###

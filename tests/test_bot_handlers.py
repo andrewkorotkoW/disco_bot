@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -218,14 +218,27 @@ def test_find_similar_falls_back_to_fts_when_embedder_unavailable(store, ai_call
 def test_analyze_ticket_with_sqlite_log_source_surfaces_car_opener_and_nearby_player(store):
     """E2E: тикет «пропал лут из машины CrSk_UAZ_469» с настоящим SqliteLogSource
     (вместо NullLogSource) -- analyze_ticket должен прогнать build_log_facts через него,
-    и итоговый LogFacts, переданный в advise(), должен содержать и транспорт, и игрока
-    рядом с машиной по данным мини-индекса."""
-    now = datetime.now(timezone.utc)
+    и итоговый LogFacts, переданный в advise(), должен содержать и историю машины, и
+    игрока рядом с ней в окно офлайна владельца, по данным мини-индекса.
+
+    НАЙДЕН ДЕФЕКТ-В-ТЕСТЕ (не в коде): до этой правки тест проверял старые поля
+    LogFacts.vehicle/events/nearby_players, которые после разделения build_log_facts
+    по категории тикета (commit 9ba8595/4d4a9e5) для category="loot_loss" больше не
+    заполняются -- заполняются vehicle_history/others_access/offline_nearby/owner_actions
+    (см. app/logs/facts.py:_build_loot_loss_facts). Тест был не обновлён и всегда проходил
+    "случайно" (все старые поля пустые, но и явных assert на их пустоту не было -- кроме
+    assert на непустой .vehicle/.events, который теперь падает). Ниже -- актуальный контракт.
+
+    `now` здесь -- naive локальное время (SERVER_TZ), как и весь app/logs/facts.py после
+    фикса сдвига с UTC (см. докстринг модуля): aware datetime.now(timezone.utc) не годится,
+    т.к. resolve_time_window() центрирует окно ±2ч вокруг naive datetime.now() и на этом
+    сервере (MSK, UTC+3) события с aware UTC-таймстампом вылетают за пределы окна."""
+    now = datetime.now()
 
     def fake_extract_ticket(text, *, client=None):
         return TicketExtraction(
             player_name=None, player_id=None, category="loot_loss",
-            summary="Пропал лут из машины", time_hint=None, needs_logs=True,
+            summary="Пропал лут из машины CrSk_UAZ_469", time_hint=None, needs_logs=True,
         )
 
     captured_log_facts = {}
@@ -283,6 +296,23 @@ def test_analyze_ticket_with_sqlite_log_source_surfaces_car_opener_and_nearby_pl
                 ),
                 source="zf",
             )
+            # Окно офлайна владельца, бракетирующее close_ts -- без него offline_nearby
+            # (единственное место, где для loot_loss используется nearby_players) не
+            # запрашивается вовсе, и Spectator1 никак не попал бы в LogFacts.
+            source._index.add_event(
+                LogEvent(
+                    ts=close_ts - timedelta(minutes=2), kind="disconnect", player="TerezVds",
+                    player_id=76561199000000031, text="disconnected", raw=None, steam64=76561199000000031,
+                ),
+                source="adm",
+            )
+            source._index.add_event(
+                LogEvent(
+                    ts=close_ts + timedelta(minutes=2), kind="connect", player="TerezVds",
+                    player_id=None, text="connected", raw=None, bi_hash="HASH_TZ",
+                ),
+                source="adm",
+            )
             source._index.commit()
 
             ticket = handlers.Ticket(
@@ -294,11 +324,220 @@ def test_analyze_ticket_with_sqlite_log_source_surfaces_car_opener_and_nearby_pl
             source.close()
 
     log_facts = captured_log_facts["value"]
-    assert log_facts.vehicle is not None and "CrSk_UAZ_469" in log_facts.vehicle
-    assert any("Spectator1" in line for line in log_facts.nearby_players)
-    assert all("FarAway" not in line for line in log_facts.nearby_players)
-    assert any("CrSk_UAZ_469" in line for line in log_facts.events)
+    assert log_facts.target_class == "CrSk_UAZ_469"
+    assert any("CrSk_UAZ_469" in line for line in log_facts.vehicle_history)
+    assert log_facts.others_access == []  # оба события -- действия самого владельца
+    assert any("Spectator1" in line for line in log_facts.offline_nearby)
+    assert all("FarAway" not in line for line in log_facts.offline_nearby)
+    assert any("CrSk_UAZ_469" in line for line in log_facts.owner_actions)
     assert result.advice.summary == "Разбор угона машины"
+
+
+def _loot_loss_fake_extract_ticket(text, *, client=None):
+    return TicketExtraction(
+        player_name=None, player_id=None, category="loot_loss",
+        summary="У меня пропал весь лут из машины Bastard_cj7_green", time_hint=None, needs_logs=True,
+    )
+
+
+def _capture_advise(captured: dict):
+    def fake_advise(ticket, similar_cases, log_facts, *, client=None):
+        captured["value"] = log_facts
+        return AdviceResponse(
+            summary="Разбор пропажи лута", facts=["см. log_facts"], similar=[],
+            recommendation="Проверить вручную", confidence=0.5, open_questions=[],
+        )
+
+    return fake_advise
+
+
+def test_analyze_ticket_loot_loss_vehicle_with_garage_history_and_no_outside_access(store):
+    """Главный e2e-тест facts.py (миссия 2.1): тикет категории loot_loss про
+    конкретную машину (Bastard_cj7_green) с историей гаража владельца и без
+    единого обращения посторонних -- build_log_facts должен найти историю
+    машины (vehicle_history) и явно сказать, что посторонних не было."""
+    now = datetime.now()
+    captured_log_facts: dict = {}
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(handlers, "extract_ticket", _loot_loss_fake_extract_ticket)
+        mp.setattr(handlers, "advise", _capture_advise(captured_log_facts))
+
+        source = SqliteLogSource(":memory:")
+        try:
+            owner_steam64 = 900000000000000010
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=40), kind="garage_store", player="Boris",
+                    player_id=owner_steam64, text="Vehicle Stored", raw=None, steam64=owner_steam64,
+                    extra={
+                        "vehicle_class": "Bastard_cj7_green", "trader_id": 0,
+                        "pos": "500.0, 600.0, 10.0", "had_insurance": False, "insurance_value": 0,
+                    },
+                ),
+                source="lbmaster",
+            )
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=30), kind="garage_restore", player="Boris",
+                    player_id=owner_steam64, text="Vehicle Restored", raw=None, steam64=owner_steam64,
+                    extra={
+                        "vehicle_class": "Bastard_cj7_green", "trader_id": 0, "vehicle_uid": 555111,
+                        "pos": "500.0, 600.0, 10.0", "in_garage_for": "10m 0s",
+                        "infinite": False, "insurance": False, "value": 0,
+                    },
+                ),
+                source="lbmaster",
+            )
+            source._index.commit()
+
+            ticket = handlers.Ticket(text="У меня пропал весь лут из машины Bastard_cj7_green", player_name="Boris")
+            handlers.analyze_ticket(store, ticket, log_source=source)
+        finally:
+            source.close()
+
+    log_facts = captured_log_facts["value"]
+    assert log_facts.target_class == "Bastard_cj7_green"
+    assert log_facts.vehicle_history  # история гаража владельца найдена
+    assert any("garage" in line or "Vehicle" in line for line in log_facts.vehicle_history)
+    assert log_facts.others_access == []
+
+    prompt_text = log_facts.to_prompt_text()
+    assert "История транспорта/контейнера (Bastard_cj7_green):" in prompt_text
+    assert "Других игроков, трогавших Bastard_cj7_green, в логах нет." in prompt_text
+    assert "Кто кроме владельца" not in prompt_text
+
+
+def test_analyze_ticket_loot_loss_vehicle_access_by_other_player_is_surfaced(store):
+    """Тот же сценарий, но с посторонним обращением к машине (Thief взял предмет
+    из Bastard_cj7_green) -- others_access должен быть непустым, а итоговый
+    текст должен показывать раздел "кто кроме владельца брал", а не строку
+    "в логах нет"."""
+    now = datetime.now()
+    captured_log_facts: dict = {}
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(handlers, "extract_ticket", _loot_loss_fake_extract_ticket)
+        mp.setattr(handlers, "advise", _capture_advise(captured_log_facts))
+
+        source = SqliteLogSource(":memory:")
+        try:
+            owner_steam64 = 900000000000000010
+            thief_steam64 = 900000000000000099
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=40), kind="garage_store", player="Boris",
+                    player_id=owner_steam64, text="Vehicle Stored", raw=None, steam64=owner_steam64,
+                    extra={
+                        "vehicle_class": "Bastard_cj7_green", "trader_id": 0,
+                        "pos": "500.0, 600.0, 10.0", "had_insurance": False, "insurance_value": 0,
+                    },
+                ),
+                source="lbmaster",
+            )
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=30), kind="garage_restore", player="Boris",
+                    player_id=owner_steam64, text="Vehicle Restored", raw=None, steam64=owner_steam64,
+                    extra={
+                        "vehicle_class": "Bastard_cj7_green", "trader_id": 0, "vehicle_uid": 555111,
+                        "pos": "500.0, 600.0, 10.0", "in_garage_for": "10m 0s",
+                        "infinite": False, "insurance": False, "value": 0,
+                    },
+                ),
+                source="lbmaster",
+            )
+            # Как реальный zf.py: text -- это verb_rest, имя субъекта в него не входит
+            # (см. находку test_event_line_mentions_actor_even_when_parser_text_omits_the_name).
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=35), kind="item_action", player="Thief",
+                    player_id=thief_steam64, text="взял с расстояния 2 м AKM (1) (ID: 321) из Транспортное средство (Bastard_cj7_green)",
+                    raw=None, steam64=thief_steam64,
+                    extra={
+                        "verb": "взял с расстояния", "item": "AKM", "item_class": "AKM",
+                        "qty": 1, "item_id": "321", "distance": 2.0,
+                        "src_chain": ["Транспортное средство (Bastard_cj7_green)"],
+                        "source_chain": ["Транспортное средство (Bastard_cj7_green)"],
+                        "src_root_class": "Bastard_cj7_green",
+                    },
+                ),
+                source="zf",
+            )
+            source._index.commit()
+
+            ticket = handlers.Ticket(text="У меня пропал весь лут из машины Bastard_cj7_green", player_name="Boris")
+            handlers.analyze_ticket(store, ticket, log_source=source)
+        finally:
+            source.close()
+
+    log_facts = captured_log_facts["value"]
+    assert log_facts.target_class == "Bastard_cj7_green"
+    assert len(log_facts.others_access) == 1
+
+    prompt_text = log_facts.to_prompt_text()
+    assert "Кто кроме владельца открывал/брал/клал:" in prompt_text
+    assert "Других игроков, трогавших Bastard_cj7_green, в логах нет." not in prompt_text
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "НАЙДЕН ДЕФЕКТ (app/logs/facts.py:_event_line), расширение уже известной находки "
+        "(test_event_line_mentions_actor_even_when_parser_text_omits_the_name в test_logs_facts.py) "
+        "на главный сценарий loot_loss: строка в others_access строится из event.text, который у "
+        "реального zf.py НЕ содержит имя субъекта (см. zf.py:_build_item_event, text=full_text="
+        "verb_rest без имени) -- итоговый 'Кто кроме владельца открывал/брал/клал' не называет, КТО "
+        "именно это сделал (Thief), хотя event.player у этого события заполнен."
+    ),
+)
+def test_others_access_line_names_the_other_player_who_took_the_item(store):
+    now = datetime.now()
+    captured_log_facts: dict = {}
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(handlers, "extract_ticket", _loot_loss_fake_extract_ticket)
+        mp.setattr(handlers, "advise", _capture_advise(captured_log_facts))
+
+        source = SqliteLogSource(":memory:")
+        try:
+            owner_steam64 = 900000000000000010
+            thief_steam64 = 900000000000000099
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=40), kind="garage_store", player="Boris",
+                    player_id=owner_steam64, text="Vehicle Stored", raw=None, steam64=owner_steam64,
+                    extra={
+                        "vehicle_class": "Bastard_cj7_green", "trader_id": 0,
+                        "pos": "500.0, 600.0, 10.0", "had_insurance": False, "insurance_value": 0,
+                    },
+                ),
+                source="lbmaster",
+            )
+            source._index.add_event(
+                LogEvent(
+                    ts=now - timedelta(minutes=35), kind="item_action", player="Thief",
+                    player_id=thief_steam64, text="взял с расстояния 2 м AKM (1) (ID: 321) из Транспортное средство (Bastard_cj7_green)",
+                    raw=None, steam64=thief_steam64,
+                    extra={
+                        "verb": "взял с расстояния", "item": "AKM", "item_class": "AKM",
+                        "qty": 1, "item_id": "321", "distance": 2.0,
+                        "src_chain": ["Транспортное средство (Bastard_cj7_green)"],
+                        "source_chain": ["Транспортное средство (Bastard_cj7_green)"],
+                        "src_root_class": "Bastard_cj7_green",
+                    },
+                ),
+                source="zf",
+            )
+            source._index.commit()
+
+            ticket = handlers.Ticket(text="У меня пропал весь лут из машины Bastard_cj7_green", player_name="Boris")
+            handlers.analyze_ticket(store, ticket, log_source=source)
+        finally:
+            source.close()
+
+    log_facts = captured_log_facts["value"]
+    assert any("Thief" in line for line in log_facts.others_access)
 
 
 def test_fixture_tickets_load_and_round_trip_through_store(store):
