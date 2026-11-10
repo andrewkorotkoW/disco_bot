@@ -23,7 +23,7 @@ from typing import Optional
 
 from . import adm, carcodelock, console, lbmaster, zf
 from .base import LogEvent
-from .index import LogIndex
+from .index import LogIndex, _parse_lbmaster_pos
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,14 @@ def _update_vehicle(index: LogIndex, event: LogEvent, kind: str) -> None:
     if kind == "zf" and event.kind in ("vehicle_spawn", "vehicle_despawn"):
         index.upsert_vehicle(extra.get("vehicle_class"), extra.get("vehicle_id"), event.x, event.z, event.ts)
     elif kind == "lbmaster" and event.kind in ("garage_store", "garage_restore"):
-        index.upsert_vehicle(extra.get("vehicle_class"), extra.get("vehicle_uid"), None, None, event.ts)
+        # garage_store (`Vehicle Stored: ...`) не содержит VehicleUID в реальном
+        # формате LBmaster (только TraderID) -- без идентификатора машины
+        # upsert_vehicle() не-op. garage_restore содержит vehicle_uid и позицию
+        # сырой строкой "x, z, y" (как ADM) в extra['pos'] -- парсим её так же,
+        # как index.add_event() делает для admin_action/chest_open.
+        pos = extra.get("pos")
+        x, z = _parse_lbmaster_pos(pos) if isinstance(pos, str) else (None, None)
+        index.upsert_vehicle(extra.get("vehicle_class"), extra.get("vehicle_uid"), x, z, event.ts)
 
 
 def _ingest_file(path: Path, kind: str, index: LogIndex, stats: dict) -> None:

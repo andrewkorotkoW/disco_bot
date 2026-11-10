@@ -165,6 +165,12 @@ class SqliteLogSource:
     def container_access(
         self, container_class_or_vehicle: str, since: Optional[datetime] = None, until: Optional[datetime] = None
     ) -> list[LogEvent]:
+        """Кто брал/класл из контейнера или машины `container_class_or_vehicle` —
+        событие попадает в результат, если этот класс является КОРНЕМ src или dst
+        цепочки (`extra['src_root_class']`/`extra['dst_root_class']`, см. zf.py) —
+        не просто встречается где-то в цепочке. Для событий без распознанных
+        цепочек (например, `container_move` с нераспознанным `details`) — запасной
+        вариант: подстрока в `notice`/`details`."""
         clauses = ["source = 'zf'", "kind IN ('item_action', 'container_move')"]
         params: list = []
         if since is not None:
@@ -180,12 +186,56 @@ class SqliteLogSource:
         matched = []
         for event in events:
             extra = event.extra or {}
-            if event.kind == "item_action":
-                chain = list(extra.get("source_chain") or []) + list(extra.get("dest_chain") or [])
-                if any(container_class_or_vehicle in part for part in chain):
+            src_root = extra.get("src_root_class")
+            dst_root = extra.get("dst_root_class")
+            if src_root is not None or dst_root is not None:
+                if src_root == container_class_or_vehicle or dst_root == container_class_or_vehicle:
                     matched.append(event)
-            else:
+                continue
+
+            # Нет root-полей (старые данные/нераспознанная цепочка) -- запасной
+            # поиск подстроки по всей цепочке и по сырому notice/details.
+            chain = (
+                list(extra.get("source_chain") or extra.get("src_chain") or [])
+                + list(extra.get("dest_chain") or extra.get("dst_chain") or [])
+            )
+            if any(container_class_or_vehicle in part for part in chain):
+                matched.append(event)
+            elif event.kind == "container_move":
                 haystack = f"{extra.get('notice', '')} {extra.get('details', '')}"
                 if container_class_or_vehicle in haystack:
                     matched.append(event)
         return matched
+
+    def nearby_during_offline(
+        self,
+        player: str,
+        pos: tuple[float, float],
+        radius: float,
+        *,
+        window_minutes: int = 10,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[dict]:
+        """Для каждого окна офлайна `player` (`offline_windows`), пересекающегося с
+        `[since, until]`, ищет (`nearby_players`) всех в радиусе `radius` от `pos`
+        вокруг НАЧАЛА и, если окно закрыто, КОНЦА этого окна — «кто был в N м от
+        последней позиции машины/игрока, пока владелец был офлайн» (docs/LOGS.md,
+        п.5б). `pos` — (x, z), её источник (последняя позиция машины или самого
+        игрока) определяет вызывающий код (`app/logs/facts.py`), т.к. зависит от
+        типа тикета."""
+        x, z = pos
+        results: list[dict] = []
+        for start, end in self.offline_windows(player):
+            if until is not None and start > until:
+                continue
+            if since is not None and end is not None and end < since:
+                continue
+            for at in (start,) if end is None else (start, end):
+                for row in self.nearby_players(x, z, radius, at, window_minutes=window_minutes):
+                    enriched = dict(row)
+                    enriched["window_start"] = start
+                    enriched["window_end"] = end
+                    enriched["checked_at"] = at
+                    results.append(enriched)
+        return results

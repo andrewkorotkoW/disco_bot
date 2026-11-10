@@ -10,13 +10,22 @@
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.ai.schemas import TicketExtraction
 
 from .base import LogEvent, LogSource
+
+# Время в логах сервера (все парсеры app/logs/*.py) -- naive datetime в местном
+# времени сервера, без tzinfo. SERVER_TZ (по умолчанию Europe/Moscow) задаёт,
+# какой это часовой пояс, для справки/документации -- само значение здесь не
+# используется для конвертации: вместо привязки к UTC (как было раньше и
+# создавало сдвиг при сравнении с naive `ts` из SqliteLogSource) весь модуль
+# работает с naive-временем в том же, "местном", соглашении, что и парсеры.
+SERVER_TZ = os.environ.get("SERVER_TZ", "Europe/Moscow")
 
 # Сколько строк фактов максимум уходит в промпт — однотипные повторы (например,
 # урон от зомби) сворачиваются в одну строку со счётчиком, чтобы влезть в лимит.
@@ -270,8 +279,10 @@ def resolve_time_window(
 ) -> tuple[datetime, datetime]:
     """Окно ±DEFAULT_WINDOW вокруг времени инцидента: если `time_hint` удаётся
     распарсить в дату/время — вокруг него, иначе вокруг `now` (момент получения
-    тикета, т.к. в самом тикете явного времени получения нет)."""
-    now = now or datetime.now(timezone.utc)
+    тикета, т.к. в самом тикете явного времени получения нет). Naive datetime
+    в местном времени сервера (SERVER_TZ) -- как и `ts` в индексе логов; не
+    сравнивать с aware-datetime."""
+    now = now or datetime.now()
     center = _parse_time_hint(time_hint, now) or now
     return center - DEFAULT_WINDOW, center + DEFAULT_WINDOW
 
@@ -316,8 +327,10 @@ def _parse_time_hint(time_hint: Optional[str], now: datetime) -> Optional[dateti
 
     if dt is None:
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is not None:
+        # time_hint пришёл как aware ISO-строка -- считаем, что указанное в ней
+        # стенное время уже местное (SERVER_TZ), просто отбрасываем tzinfo.
+        dt = dt.replace(tzinfo=None)
     return dt
 
 
