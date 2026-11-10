@@ -14,6 +14,13 @@
 
 Идентификатор игрока на connect/hit/kill/chat — BI-hash (`bi_hash`), на
 disconnect — steam64 (`steam64`/`player_id`).
+
+`hit`/`kill` несут `extra['attacker_kind']` (`player`/`ai`/`infected`/`fall`/
+`fire`/`env`) — для `hit` это дубль уже существующего `extra['subtype']`
+(оставлен для обратной совместимости тестов), для `kill` поле новое.
+`unconscious` используется и для AI (как раньше), и для игроков — различать
+по `extra['subject_type']` (`ai`/`player`); состояние — `extra['state']`
+(`unconscious`/`regained consciousness`).
 """
 from __future__ import annotations
 
@@ -43,20 +50,38 @@ _HIT_RE = re.compile(
     r'(?: group=(?P<group>\d+))?(?: faction="(?P<faction>[^"]*)")? pos=<(?P<pos>[^>]+)>\)'
     r"\[HP: (?P<hp>[\d.]+)\] hit by (?P<rest>.+)$"
 )
-_SUICIDE_RE = re.compile(r'^Player "(?P<name>[^"]+)" \(id=(?P<id>[^)]+?)\s*\) committed suicide$')
+_SUICIDE_RE = re.compile(
+    r'^Player "(?P<name>[^"]+)"(?: \(DEAD\))? \(id=(?P<id>[^ )]+)'
+    r'(?: group=\d+)?(?: faction="[^"]*")?(?: pos=<[^>]+>)?\s*\) committed suicide$'
+)
 _KILLED_PLAYER_RE = re.compile(
-    r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)\) killed by (?P<rest>.+)$'
+    r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)'
+    r'(?: group=\d+)?(?: faction="[^"]*")?(?: pos=<[^>]+>)?\) killed by (?P<rest>.+)$'
 )
 _KILLED_AI_RE = re.compile(
-    r'^AI "(?P<name>[^"]+)" \(DEAD\) \(group=(?P<group>\d+):"(?P<gname>[^"]*)" '
+    r'^AI "(?P<name>[^"]*)" \(DEAD\) \(group=(?P<group>\d+)(?::"(?P<gname>[^"]*)")? '
     r'faction="(?P<faction>[^"]*)" pos=<(?P<pos>[^>]+)>\) killed by (?P<rest>.+)$'
 )
-_DEATH_RE = re.compile(r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)\) died\. Stats> (?P<stats>.+)$')
-_BLED_OUT_RE = re.compile(r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)\) bled out$')
-_RESPAWN_RE = re.compile(r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)\) is choosing to respawn$')
+_DEATH_RE = re.compile(
+    r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)'
+    r'(?: group=\d+)?(?: faction="[^"]*")?(?: pos=<[^>]+>)?\) died\. Stats> (?P<stats>.+)$'
+)
+_BLED_OUT_RE = re.compile(
+    r'^Player "(?P<name>[^"]+)" \(DEAD\) \(id=(?P<id>[^ )]+)'
+    r'(?: group=\d+)?(?: faction="[^"]*")?(?: pos=<[^>]+>)?\) bled out$'
+)
+_RESPAWN_RE = re.compile(
+    r'^Player "(?P<name>[^"]+)"(?: \(DEAD\))? \(id=(?P<id>[^ )]+)'
+    r'(?: group=\d+)?(?: faction="[^"]*")?(?: pos=<[^>]+>)?\) is choosing to respawn$'
+)
 _AI_STATE_RE = re.compile(
-    r'^AI "(?P<name>[^"]+)" \(group=(?P<group>\d+):"(?P<gname>[^"]*)" faction="(?P<faction>[^"]*)" '
-    r"pos=<(?P<pos>[^>]+)>\) is (?P<state>unconscious|regained consciousness|turned hostile to .+)$"
+    r'^AI "(?P<name>[^"]*)" \(group=(?P<group>\d+)(?::"(?P<gname>[^"]*)")? faction="(?P<faction>[^"]*)" '
+    r"pos=<(?P<pos>[^>]+)>\) (?:is )?(?P<state>unconscious|regained consciousness|turned hostile to .+)$"
+)
+_PLAYER_STATE_RE = re.compile(
+    r'^Player "(?P<name>[^"]+)" \(id=(?P<id>[^ )]+)'
+    r'(?: group=(?P<group>\d+))?(?: faction="(?P<faction>[^"]*)")?(?: pos=<(?P<pos>[^>]+)>)?\) '
+    r"(?:is )?(?P<state>unconscious|regained consciousness)$"
 )
 _CHAT_RE = re.compile(r'^\[Chat - (?P<channel>[^\]]+)\]\("(?P<name>[^"]+)"\(id=(?P<id>[^)]+)\)\): (?P<text>.*)$')
 
@@ -64,14 +89,17 @@ _ATTACKER_PLAYER_RE = re.compile(
     r'^Player "(?P<aname>[^"]+)" \(id=(?P<aid>[^ )]+)'
     r'(?: group=(?P<agroup>\d+))?(?: faction="(?P<afaction>[^"]*)")?(?: pos=<[^>]+>)?\)\s*(?P<tail>.*)$'
 )
+_ATTACKER_AI_RE = re.compile(
+    r'^AI "(?P<aname>[^"]*)" \(group=(?P<agroup>\d+)(?::"(?P<agname>[^"]*)")? faction="(?P<afaction>[^"]*)"'
+    r'(?: pos=<[^>]+>)?\)\s*(?P<tail>.*)$'
+)
 _TAIL_RE = re.compile(
     r"^into (?P<body_part>\w+)\((?P<bp_num>\d+)\) for (?P<damage>[\d.]+) damage"
-    r"(?: \((?P<weapon>[^)]+)\))?$|^with (?P<weapon2>.+?) from (?P<distance>[\d.]+)$"
+    r"(?: \((?P<ammo>[^)]+)\))?(?: with (?P<r_weapon>.+?) from (?P<r_distance>[\d.]+)(?: meters)?)?\s*$"
+    r"|^with (?P<weapon2>.+?) from (?P<distance2>[\d.]+)(?: meters)?\s*$"
 )
-_INFECTED_HIT_RE = re.compile(
-    r"^(?P<aname>Зараженный) (?P<tail>into \w+\(\d+\) for [\d.]+ damage(?: \([^)]+\))?)$"
-)
-_FIRE_HIT_RE = re.compile(r"^(?P<weapon>.+?) with (?P<dtype>\w+)$")
+_INFECTED_HIT_RE = re.compile(r"^(?P<aname>Зараженный) (?P<tail>.+)$")
+_FIRE_HIT_RE = re.compile(r"^(?P<weapon>.+?) with (?P<dtype>\w+)\s*$")
 
 
 def _steam64(raw_id: str) -> Optional[int]:
@@ -89,42 +117,57 @@ def _parse_pos(pos: str) -> tuple[Optional[float], Optional[float]]:
         return None, None
 
 
+def _fill_tail(info: dict, tail: str) -> None:
+    """Разбирает хвост 'into Body(n) for N damage (ammo) with Weapon from Dist meters'
+    или 'with Weapon from Dist meters' и дополняет info body_part/damage/weapon/distance."""
+    tm = _TAIL_RE.match(tail)
+    if not tm:
+        return
+    if tm.group("body_part"):
+        info["body_part"] = tm.group("body_part")
+        info["damage"] = float(tm.group("damage"))
+        info["weapon"] = tm.group("r_weapon") or tm.group("ammo")
+        if tm.group("r_distance"):
+            info["distance"] = float(tm.group("r_distance"))
+    elif tm.group("weapon2"):
+        info["weapon"] = tm.group("weapon2")
+        info["distance"] = float(tm.group("distance2"))
+
+
 def _parse_hit_tail(rest: str) -> dict:
     """Best-effort разбор 'hit by ...' — не критично для создания события hit."""
-    info: dict = {"subtype": "other", "attacker": rest}
+    info: dict = {"subtype": "other", "attacker_kind": "env", "attacker": rest}
     m = _ATTACKER_PLAYER_RE.match(rest)
     if m:
         info["subtype"] = "player"
+        info["attacker_kind"] = "player"
         info["attacker"] = m.group("aname")
         info["attacker_id"] = m.group("aid")
-        tail = m.group("tail")
-        tm = _TAIL_RE.match(tail)
-        if tm:
-            if tm.group("body_part"):
-                info["body_part"] = tm.group("body_part")
-                info["damage"] = float(tm.group("damage"))
-                info["weapon"] = tm.group("weapon")
-            else:
-                info["weapon"] = tm.group("weapon2")
-                info["distance"] = float(tm.group("distance"))
+        _fill_tail(info, m.group("tail"))
+        return info
+    m = _ATTACKER_AI_RE.match(rest)
+    if m:
+        info["subtype"] = "ai"
+        info["attacker_kind"] = "ai"
+        info["attacker"] = m.group("aname")
+        _fill_tail(info, m.group("tail"))
         return info
     m = _INFECTED_HIT_RE.match(rest)
     if m:
         info["subtype"] = "infected"
+        info["attacker_kind"] = "infected"
         info["attacker"] = m.group("aname")
-        tm = _TAIL_RE.match(m.group("tail"))
-        if tm and tm.group("body_part"):
-            info["body_part"] = tm.group("body_part")
-            info["damage"] = float(tm.group("damage"))
-            info["weapon"] = tm.group("weapon")
+        _fill_tail(info, m.group("tail"))
         return info
     if rest.startswith("FallDamageHealth"):
         info["subtype"] = "fall"
+        info["attacker_kind"] = "fall"
         info["attacker"] = "FallDamageHealth"
         return info
     m = _FIRE_HIT_RE.match(rest)
     if m and "FireDamage" in rest:
         info["subtype"] = "fire"
+        info["attacker_kind"] = "fire"
         info["attacker"] = m.group("weapon")
         info["weapon"] = m.group("weapon")
         return info
@@ -132,17 +175,23 @@ def _parse_hit_tail(rest: str) -> dict:
 
 
 def _parse_kill_rest(rest: str) -> dict:
-    info: dict = {"attacker": rest}
+    info: dict = {"attacker": rest, "attacker_kind": "env"}
     m = _ATTACKER_PLAYER_RE.match(rest)
     if m:
         info["attacker"] = m.group("aname")
         info["attacker_id"] = m.group("aid")
-        tail = m.group("tail")
-        if tail:
-            tm = _TAIL_RE.match(tail)
-            if tm and tm.group("weapon2"):
-                info["weapon"] = tm.group("weapon2")
-                info["distance"] = float(tm.group("distance"))
+        info["attacker_kind"] = "player"
+        _fill_tail(info, m.group("tail"))
+        return info
+    m = _ATTACKER_AI_RE.match(rest)
+    if m:
+        info["attacker"] = m.group("aname")
+        info["attacker_kind"] = "ai"
+        _fill_tail(info, m.group("tail"))
+        return info
+    if rest.startswith("Zmb"):
+        info["attacker_kind"] = "infected"
+        return info
     return info
 
 
@@ -224,7 +273,10 @@ def _parse_body(ts: datetime, body: str, raw: str) -> Optional[LogEvent]:
             hp=float(m.group("hp")), x=x, z=z,
             attacker=info.get("attacker"), weapon=info.get("weapon"),
             distance=info.get("distance"), body_part=info.get("body_part"), damage=info.get("damage"),
-            extra={"subtype": info.get("subtype"), "attacker_id": info.get("attacker_id")},
+            extra={
+                "subtype": info.get("subtype"), "attacker_kind": info.get("attacker_kind"),
+                "attacker_id": info.get("attacker_id"),
+            },
         )
 
     m = _SUICIDE_RE.match(body)
@@ -241,7 +293,10 @@ def _parse_body(ts: datetime, body: str, raw: str) -> Optional[LogEvent]:
             ts=ts, kind="kill", player=m.group("name"), player_id=None, text=body, raw=raw,
             bi_hash=m.group("id"), attacker=info.get("attacker"), weapon=info.get("weapon"),
             distance=info.get("distance"),
-            extra={"victim_type": "player", "attacker_id": info.get("attacker_id")},
+            extra={
+                "victim_type": "player", "attacker_kind": info.get("attacker_kind"),
+                "attacker_id": info.get("attacker_id"),
+            },
         )
 
     m = _KILLED_AI_RE.match(body)
@@ -251,7 +306,10 @@ def _parse_body(ts: datetime, body: str, raw: str) -> Optional[LogEvent]:
             ts=ts, kind="kill", player=None, player_id=None, text=body, raw=raw,
             group=m.group("group"), faction=m.group("faction"),
             attacker=info.get("attacker"), weapon=info.get("weapon"), distance=info.get("distance"),
-            extra={"victim_type": "ai", "victim_name": m.group("name"), "attacker_id": info.get("attacker_id")},
+            extra={
+                "victim_type": "ai", "victim_name": m.group("name"),
+                "attacker_kind": info.get("attacker_kind"), "attacker_id": info.get("attacker_id"),
+            },
         )
 
     m = _DEATH_RE.match(body)
@@ -281,7 +339,16 @@ def _parse_body(ts: datetime, body: str, raw: str) -> Optional[LogEvent]:
         return LogEvent(
             ts=ts, kind="unconscious", player=None, player_id=None, text=body, raw=raw,
             group=m.group("group"), faction=m.group("faction"), x=x, z=z,
-            extra={"ai_name": m.group("name"), "state": m.group("state")},
+            extra={"subject_type": "ai", "ai_name": m.group("name"), "state": m.group("state")},
+        )
+
+    m = _PLAYER_STATE_RE.match(body)
+    if m:
+        x, z = _parse_pos(m.group("pos")) if m.group("pos") else (None, None)
+        return LogEvent(
+            ts=ts, kind="unconscious", player=m.group("name"), player_id=None, text=body, raw=raw,
+            bi_hash=m.group("id"), group=m.group("group"), faction=m.group("faction"), x=x, z=z,
+            extra={"subject_type": "player", "state": m.group("state")},
         )
 
     m = _CHAT_RE.match(body)

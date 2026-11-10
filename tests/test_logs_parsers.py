@@ -330,8 +330,11 @@ def test_lbmaster_garage_store_and_restore():
     restore = next(e for e in events if e.kind == "garage_restore")
     assert store.steam64 == 76561199000000031
     assert store.extra["vehicle_class"] == "CrSk_UAZ_469"
-    assert store.extra["vehicle_uid"] == "998877"
-    assert restore.extra["vehicle_uid"] == "998899"
+    # живые логи Stored-строк не содержат VehicleUID (только Restored) — фикстура
+    # раньше это придумывала.
+    assert "vehicle_uid" not in store.extra
+    assert restore.extra["vehicle_uid"] == 998899
+    assert restore.extra["in_garage_for"] == "5m 0s"
 
 
 def test_lbmaster_watchlist_noise_and_garbage_line_are_skipped():
