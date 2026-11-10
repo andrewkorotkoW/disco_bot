@@ -33,6 +33,16 @@ def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
+def _dump_log_facts(log_facts: Any) -> str:
+    """log_facts обычно — app.logs.facts.LogFacts (уже отрендерен в читаемые
+    строки своим to_prompt_text()); для обратной совместимости со старым
+    контрактом (список LogEvent/что угодно без этого метода) — через _dump."""
+    to_prompt_text = getattr(log_facts, "to_prompt_text", None)
+    if callable(to_prompt_text):
+        return to_prompt_text()
+    return _dump(log_facts)
+
+
 def extract_ticket(text: str, *, client: Anthropic | None = None) -> TicketExtraction:
     """Извлекает из текста тикета игрока структурированные поля."""
     client = client or get_client()
@@ -54,12 +64,18 @@ def advise(
     *,
     client: Anthropic | None = None,
 ) -> AdviceResponse:
-    """Собирает разбор тикета для админа: факты, похожие кейсы, рекомендацию."""
+    """Собирает разбор тикета для админа: факты, похожие кейсы, рекомендацию.
+
+    log_facts — обычно `app.logs.facts.LogFacts` (см. `app.logs.facts.build_log_facts`);
+    принимается `Any` для совместимости с любым объектом, у которого есть
+    `to_prompt_text()`, либо с чем угодно сериализуемым через `_dump` (старый
+    контракт — список `LogEvent`/пустой список, когда логи не нужны/не нашлись).
+    """
     client = client or get_client()
     user_content = (
         "Тикет администратора:\n" + _dump(ticket) + "\n\n"
         "Похожие кейсы из базы:\n" + _dump(similar_cases) + "\n\n"
-        "Факты из логов сервера:\n" + _dump(log_facts)
+        "Факты из логов сервера:\n" + _dump_log_facts(log_facts)
     )
     response = client.messages.parse(
         model=get_model(),
