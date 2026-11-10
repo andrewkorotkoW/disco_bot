@@ -6,8 +6,8 @@
 04:00:35 [ADMIN] [AdminTools] Admin dimonbigboy (502) toggled ESP: true
 04:00:40 [ADMIN] [AdminTools] Admin dimonbigboy (502) set Modifier INVISIBLE to true for Irina Drakylina
 04:00:45 [ADMIN] [AdminTools] Admin dimonbigboy (502) cleared inventory of Per_Duck
-04:00:50 [INFO ] [LootChests] Player Per_Duck (503) opened chest at <120.0, 220.0, 12.0>
-04:00:55 [ADMIN] [VirtualGarage] Player TerezVds (76561199000000031) stored vehicle CrSk_UAZ_469 (VehicleUID: 998877)
-04:01:00 [ADMIN] [VirtualGarage] Player TerezVds (76561199000000031) restored vehicle CrSk_UAZ_469 (VehicleUID: 998899)
+04:00:50 [INFO ] [LootChests] Player Per_Duck (76561199000000033) opened chest at <120.0, 220.0, 12.0> with Crowbar Successrate: 0.2 Rand: 0.5
+04:00:55 [ADMIN] [VirtualGarage] Vehicle Stored: CrSk_UAZ_469 by TerezVds (76561199000000031) at <130.0, 230.0, 13.0> TraderID: 0 Had Insurance: false Insurance Value: 0
+04:01:00 [ADMIN] [VirtualGarage] Vehicle Restored: CrSk_UAZ_469 by TerezVds (76561199000000031) at <130.0, 230.0, 13.0> TraderID: 0 VehicleUID: 998899 Infinite ? false. Vehicle was in Garage for 5m 0s Insurance: false Value: 0
 04:01:05 [INFO ] [AdminTools] Received Watchlist/Banlist from webserver
 совершенно мусорная строка без метки времени и модуля

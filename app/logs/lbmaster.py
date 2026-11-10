@@ -4,16 +4,22 @@
 каждой строке — берём её из имени файла (`D_M_YYYY` в начале имени), либо из
 `base_date`, переданного вызывающим кодом, если имя файла не распознано.
 
-Kinds: `join`, `leave`, `chest_open`, `garage_store`/`garage_restore`
-(класс машины + VehicleUID в `extra`) и `admin_action` с подтипами
+Kinds: `join`, `leave`, `chest_open` (подтипы `attempt`/`success` в
+`extra['subtype']`), `garage_store`/`garage_restore`/`garage_placed`/
+`garage_deleted` и `admin_action` с подтипами
 `teleport`/`spawn`/`delete`/`esp`/`invisible`/`clear_inventory` — подтип
 определяется по тексту после `Admin <имя> (<obf_id>) `.
 
-Строка Virtual Garage в доступных образцах docs/LOGS.md не встретилась
-буквально — формат ниже подобран по общему виду `[ADMIN] [Module] текст`
-этого лога:
-    Player <имя> (<steam64>) stored vehicle <класс> (VehicleUID: <uid>)
-    Player <имя> (<steам64>) restored vehicle <класс> (VehicleUID: <uid>)
+Формат строк Virtual Garage/LootChests подобран по живым логам (приёмка
+миссии 2.1, LOG_DIR):
+    [ADMIN] [VirtualGarage] Vehicle Stored: <класс> by <имя> (<steam64>) at <x, y, z> TraderID: N Had Insurance: true|false Insurance Value: N
+    [ADMIN] [VirtualGarage] Vehicle Restored: <класс> by <имя> (<steam64>) at <x, y, z> TraderID: N VehicleUID: N Infinite ? true|false. Vehicle was in Garage for <длительность> Insurance: true|false Value: N
+    [ADMIN] [VirtualGarage] New Public Garage was placed by <имя> (<steam64>) at <x, y, z> GarageID: N
+    [ADMIN] [VirtualGarage] Admin Trader was deleted by <имя> (<steam64>) at <x, y, z> UID: N
+    [INFO ] [LootChests] Player <имя> (<steam64>) opened chest at <x, y, z> with <инструмент> Successrate: N Rand: N
+    [ADMIN] [LootChests] Player <имя> (<steam64>) successfully opened chest <класс сейфа> for <конфиг> at <x, y, z>
+Слово перед Stored/Restored — не всегда "Vehicle" (встречается и "Bike"), поэтому
+регексы не привязываются к конкретному слову.
 
 Шумные строки (`Received Watchlist/Banlist ...` и т.п.) не дают события.
 Нераспознанные строки пропускаются, счётчики — в `ParseSummary`.
@@ -38,11 +44,31 @@ _JOIN_RE = re.compile(
     r"^Player Joined with Obfuscated ID: (?P<obf>\d+) Real Identity: (?P<name>.+?) \((?P<steam64>\d{17})\)$"
 )
 _LEAVE_RE = re.compile(r"^Player (?P<name>.+?) \((?P<steam64>\d{17})\) left the server$")
-_CHEST_RE = re.compile(r"^Player (?P<name>.+?) \((?P<obf>\d+)\) opened chest at <(?P<pos>[^>]+)>$")
+_CHEST_ATTEMPT_RE = re.compile(
+    r"^Player (?P<name>.+?) \((?P<steam64>\d{17})\) opened chest at <(?P<pos>[^>]+)> "
+    r"with (?P<tool>\S+) Successrate: (?P<rate>[\d.]+) Rand: (?P<rand>[\d.]+)$"
+)
+_CHEST_SUCCESS_RE = re.compile(
+    r"^Player (?P<name>.+?) \((?P<steam64>\d{17})\) successfully opened chest (?P<chest_class>\S+) "
+    r"for (?P<chest_config>.+?) at <(?P<pos>[^>]+)>$"
+)
 _ADMIN_RE = re.compile(r"^Admin (?P<admin>.+?) \((?P<obf>\d+)\) (?P<action>.+)$")
-_GARAGE_RE = re.compile(
-    r"^Player (?P<name>.+?) \((?P<steam64>\d{17})\) (?P<verb>stored|restored) vehicle "
-    r"(?P<vclass>\S+) \(VehicleUID: (?P<uid>\d+)\)$"
+_GARAGE_STORE_RE = re.compile(
+    r"^\w+ Stored: (?P<vclass>\S+) by (?P<name>.+?) \((?P<steam64>\d{17})\) at <(?P<pos>[^>]+)> "
+    r"TraderID: (?P<trader_id>\d+) Had Insurance: (?P<had_insurance>true|false) Insurance Value: (?P<insurance_value>\d+)$"
+)
+_GARAGE_RESTORE_RE = re.compile(
+    r"^\w+ Restored: (?P<vclass>\S+) by (?P<name>.+?) \((?P<steam64>\d{17})\) at <(?P<pos>[^>]+)> "
+    r"TraderID: (?P<trader_id>\d+) VehicleUID: (?P<uid>\d+) Infinite \? (?P<infinite>true|false)\. "
+    r"\w+ was in Garage for (?P<in_garage_for>.+?) Insurance: (?P<insurance>true|false) Value: (?P<value>\d+)$"
+)
+_GARAGE_PLACED_RE = re.compile(
+    r"^New Public Garage was placed by (?P<name>.+?) \((?P<steam64>\d{17})\) at <(?P<pos>[^>]+)> "
+    r"GarageID: (?P<garage_id>\d+)$"
+)
+_GARAGE_DELETED_RE = re.compile(
+    r"^Admin Trader was deleted by (?P<name>.+?) \((?P<steam64>\d{17})\) at <(?P<pos>[^>]+)> "
+    r"UID: (?P<uid>\d+)$"
 )
 
 _TELEPORT_RE = re.compile(r"^Teleported (?P<target>.+?) to <(?P<pos>[^>]+)>$")
@@ -119,20 +145,71 @@ def _parse_text(ts: datetime, text: str) -> Optional[LogEvent]:
             steam64=steam64,
         )
 
-    m = _CHEST_RE.match(text)
-    if m:
-        return LogEvent(
-            ts=ts, kind="chest_open", player=m.group("name"), player_id=None, text=text, raw=text,
-            extra={"obfuscated_id": m.group("obf"), "pos": m.group("pos")},
-        )
-
-    m = _GARAGE_RE.match(text)
+    m = _CHEST_ATTEMPT_RE.match(text)
     if m:
         steam64 = int(m.group("steam64"))
-        kind = "garage_store" if m.group("verb") == "stored" else "garage_restore"
         return LogEvent(
-            ts=ts, kind=kind, player=m.group("name"), player_id=steam64, text=text, raw=text,
-            steam64=steam64, extra={"vehicle_class": m.group("vclass"), "vehicle_uid": m.group("uid")},
+            ts=ts, kind="chest_open", player=m.group("name"), player_id=steam64, text=text, raw=text,
+            steam64=steam64,
+            extra={
+                "subtype": "attempt", "pos": m.group("pos"), "tool": m.group("tool"),
+                "successrate": float(m.group("rate")), "rand": float(m.group("rand")),
+            },
+        )
+
+    m = _CHEST_SUCCESS_RE.match(text)
+    if m:
+        steam64 = int(m.group("steam64"))
+        return LogEvent(
+            ts=ts, kind="chest_open", player=m.group("name"), player_id=steam64, text=text, raw=text,
+            steam64=steam64,
+            extra={
+                "subtype": "success", "pos": m.group("pos"),
+                "chest_name": m.group("chest_class"), "chest_config": m.group("chest_config"),
+            },
+        )
+
+    m = _GARAGE_STORE_RE.match(text)
+    if m:
+        steam64 = int(m.group("steam64"))
+        return LogEvent(
+            ts=ts, kind="garage_store", player=m.group("name"), player_id=steam64, text=text, raw=text,
+            steam64=steam64,
+            extra={
+                "vehicle_class": m.group("vclass"), "trader_id": int(m.group("trader_id")),
+                "pos": m.group("pos"), "had_insurance": m.group("had_insurance") == "true",
+                "insurance_value": int(m.group("insurance_value")),
+            },
+        )
+
+    m = _GARAGE_RESTORE_RE.match(text)
+    if m:
+        steam64 = int(m.group("steam64"))
+        return LogEvent(
+            ts=ts, kind="garage_restore", player=m.group("name"), player_id=steam64, text=text, raw=text,
+            steam64=steam64,
+            extra={
+                "vehicle_class": m.group("vclass"), "trader_id": int(m.group("trader_id")),
+                "vehicle_uid": int(m.group("uid")), "pos": m.group("pos"),
+                "in_garage_for": m.group("in_garage_for"), "infinite": m.group("infinite") == "true",
+                "insurance": m.group("insurance") == "true", "value": int(m.group("value")),
+            },
+        )
+
+    m = _GARAGE_PLACED_RE.match(text)
+    if m:
+        steam64 = int(m.group("steam64"))
+        return LogEvent(
+            ts=ts, kind="garage_placed", player=m.group("name"), player_id=steam64, text=text, raw=text,
+            steam64=steam64, extra={"pos": m.group("pos"), "garage_id": int(m.group("garage_id"))},
+        )
+
+    m = _GARAGE_DELETED_RE.match(text)
+    if m:
+        steam64 = int(m.group("steam64"))
+        return LogEvent(
+            ts=ts, kind="garage_deleted", player=m.group("name"), player_id=steam64, text=text, raw=text,
+            steam64=steam64, extra={"pos": m.group("pos"), "uid": int(m.group("uid"))},
         )
 
     m = _ADMIN_RE.match(text)
