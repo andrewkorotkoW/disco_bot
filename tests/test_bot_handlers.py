@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ from app.ai.schemas import AdviceResponse, TicketExtraction
 from app.bot import handlers
 from app.cases import CaseStore
 from app.cases import search as cases_search
+from app.logs.base import LogEvent
+from app.logs.sqlite_source import SqliteLogSource
 
 FIXTURES_PATH = Path(__file__).parent / "fixtures" / "tickets.json"
 VECTOR_SIZE = 64
@@ -210,6 +213,92 @@ def test_find_similar_falls_back_to_fts_when_embedder_unavailable(store, ai_call
     assert case.id == result.case.id
     assert method == "fts"
     assert decision is not None
+
+
+def test_analyze_ticket_with_sqlite_log_source_surfaces_car_opener_and_nearby_player(store):
+    """E2E: тикет «пропал лут из машины CrSk_UAZ_469» с настоящим SqliteLogSource
+    (вместо NullLogSource) -- analyze_ticket должен прогнать build_log_facts через него,
+    и итоговый LogFacts, переданный в advise(), должен содержать и транспорт, и игрока
+    рядом с машиной по данным мини-индекса."""
+    now = datetime.now(timezone.utc)
+
+    def fake_extract_ticket(text, *, client=None):
+        return TicketExtraction(
+            player_name=None, player_id=None, category="loot_loss",
+            summary="Пропал лут из машины", time_hint=None, needs_logs=True,
+        )
+
+    captured_log_facts = {}
+
+    def fake_advise(ticket, similar_cases, log_facts, *, client=None):
+        captured_log_facts["value"] = log_facts
+        return AdviceResponse(
+            summary="Разбор угона машины", facts=["см. log_facts"], similar=[],
+            recommendation="Проверить вручную", confidence=0.5, open_questions=[],
+        )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(handlers, "extract_ticket", fake_extract_ticket)
+        mp.setattr(handlers, "advise", fake_advise)
+
+        source = SqliteLogSource(":memory:")
+        try:
+            # Идентичность владельца машины (как даёт реальный ADM connect/disconnect).
+            source._index.upsert_identity(now - timedelta(minutes=30), name="TerezVds", bi_hash="HASH_TZ")
+            source._index.upsert_identity(now - timedelta(minutes=29), name="TerezVds", steam64=76561199000000031)
+
+            open_ts = now - timedelta(minutes=10)
+            close_ts = now - timedelta(minutes=5)
+            source._index.add_event(
+                LogEvent(
+                    ts=open_ts, kind="vehicle_open", player=None, player_id=76561199000000031,
+                    text="open transport CrSk_UAZ_469", raw=None, steam64=76561199000000031,
+                    x=100.0, z=200.0, extra={"vehicle_class": "CrSk_UAZ_469"},
+                ),
+                source="carcodelock",
+            )
+            source._index.add_event(
+                LogEvent(
+                    ts=close_ts, kind="vehicle_close", player=None, player_id=76561199000000031,
+                    text="close transport CrSk_UAZ_469", raw=None, steam64=76561199000000031,
+                    x=101.0, z=201.0, extra={"vehicle_class": "CrSk_UAZ_469"},
+                ),
+                source="carcodelock",
+            )
+            # Кто-то стоял рядом с машиной в момент, близкий к закрытию (roster-снимок ZF).
+            source._index.add_event(
+                LogEvent(
+                    ts=close_ts - timedelta(minutes=1), kind="roster", player="Spectator1", player_id=None,
+                    text="roster", raw=None, steam64=900000000000000002, x=108.0, z=205.0,
+                    extra={"pos": (108.0, 0.0, 205.0), "playtime": "0 д."},
+                ),
+                source="zf",
+            )
+            # Контроль: игрок далеко от машины не должен попасть в "рядом".
+            source._index.add_event(
+                LogEvent(
+                    ts=close_ts, kind="roster", player="FarAway", player_id=None,
+                    text="roster", raw=None, steam64=900000000000000003, x=9000.0, z=9000.0,
+                    extra={"pos": (9000.0, 0.0, 9000.0), "playtime": "0 д."},
+                ),
+                source="zf",
+            )
+            source._index.commit()
+
+            ticket = handlers.Ticket(
+                text="У меня пропал лут из машины CrSk_UAZ_469",
+                player_name="TerezVds",
+            )
+            result = handlers.analyze_ticket(store, ticket, log_source=source)
+        finally:
+            source.close()
+
+    log_facts = captured_log_facts["value"]
+    assert log_facts.vehicle is not None and "CrSk_UAZ_469" in log_facts.vehicle
+    assert any("Spectator1" in line for line in log_facts.nearby_players)
+    assert all("FarAway" not in line for line in log_facts.nearby_players)
+    assert any("CrSk_UAZ_469" in line for line in log_facts.events)
+    assert result.advice.summary == "Разбор угона машины"
 
 
 def test_fixture_tickets_load_and_round_trip_through_store(store):
