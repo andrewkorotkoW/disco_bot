@@ -1,4 +1,4 @@
-"""CLI индекса логов: `python -m app.logs ingest|player|vehicle|near`."""
+"""CLI индекса логов: `python -m app.logs ingest|player|vehicle|near|container`."""
 from __future__ import annotations
 
 import argparse
@@ -44,6 +44,20 @@ def _cmd_vehicle(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_container(args: argparse.Namespace) -> int:
+    with SqliteLogSource() as source:
+        events = source.container_access(
+            args.container_class, since=_parse_dt(args.since), until=_parse_dt(args.until)
+        )
+        actors: set[str] = set()
+        for event in events:
+            actor = event.player or (event.extra or {}).get("actor_class") or "?"
+            print(f"{event.ts.isoformat()} [{event.kind}] {actor}: {event.text}")
+            actors.add(actor)
+        print(f"всего событий: {len(events)}; брали/класли: {', '.join(sorted(actors)) or '—'}")
+    return 0
+
+
 def _cmd_near(args: argparse.Namespace) -> int:
     at = _parse_dt(args.at)
     if at is None:
@@ -74,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_vehicle = sub.add_parser("vehicle", help="история событий по классу машины")
     p_vehicle.add_argument("vehicle_class")
     p_vehicle.set_defaults(func=_cmd_vehicle)
+
+    p_container = sub.add_parser("container", help="кто брал/класл в контейнер/машину заданного класса")
+    p_container.add_argument("container_class")
+    p_container.add_argument("--since")
+    p_container.add_argument("--until")
+    p_container.set_defaults(func=_cmd_container)
 
     p_near = sub.add_parser("near", help="кто был рядом с точкой во временном окне")
     p_near.add_argument("x", type=float)

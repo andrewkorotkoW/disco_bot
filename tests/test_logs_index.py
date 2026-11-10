@@ -97,15 +97,19 @@ def test_ingest_populates_vehicles_table(db_path):
         ).fetchall()
 
         vehicles = {(r["class"], r["zf_id_or_vehicle_uid"]): r for r in rows}
-        # LBmaster garage_store/garage_restore -- разные VehicleUID -> разные строки (не UPSERT в одну).
-        assert ("CrSk_UAZ_469", "998877") in vehicles
+        # LBmaster "Vehicle Stored" в реальном формате не содержит VehicleUID (только
+        # TraderID) -- без идентификатора машины garage_store не создаёт строку в vehicles.
+        # garage_restore содержит VehicleUID (998899) и позицию -- она и попадает в таблицу.
         assert ("CrSk_UAZ_469", "998899") in vehicles
+        uaz = vehicles[("CrSk_UAZ_469", "998899")]
+        assert uaz["last_pos_x"] == 130.0
+        assert uaz["last_pos_z"] == 230.0
         # ZF vehicle_spawn/vehicle_despawn -- один и тот же vehicle_id -> одна строка с последними координатами.
         assert ("Bastard_cj7_green", "55") in vehicles
         bastard = vehicles[("Bastard_cj7_green", "55")]
         assert bastard["last_pos_x"] == 8090.1
         assert bastard["last_pos_z"] == 9330.9
-        assert len(rows) == 3
+        assert len(rows) == 2
 
 
 def test_ingest_is_idempotent_on_repeated_run_same_directory(db_path):

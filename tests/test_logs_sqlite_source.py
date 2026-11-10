@@ -125,6 +125,63 @@ def test_offline_windows_empty_for_player_with_no_disconnects(source):
     assert source.offline_windows("AlwaysOnline") == []
 
 
+# --- nearby_during_offline ----------------------------------------------------
+
+
+def test_nearby_during_offline_checks_start_and_end_of_closed_window(source):
+    source._index.add_event(
+        LogEvent(ts=_t(10), kind="disconnect", player="Owner", player_id=None, text="disconnected", raw=None),
+        source="adm",
+    )
+    source._index.add_event(
+        LogEvent(ts=_t(30), kind="connect", player="Owner", player_id=None, text="connected", raw=None),
+        source="adm",
+    )
+    # Рядом с машиной в начале окна офлайна.
+    source._index.add_event(_roster_event(_t(10), "Looter", 7, x=100.0, z=100.0), source="zf")
+    # Рядом с машиной в конце окна офлайна -- другой игрок.
+    source._index.add_event(_roster_event(_t(30), "LateLooter", 8, x=101.0, z=100.0), source="zf")
+    source._index.commit()
+
+    results = source.nearby_during_offline("Owner", pos=(100.0, 100.0), radius=50.0)
+
+    assert {r["player"] for r in results} == {"Looter", "LateLooter"}
+    assert all(r["window_start"] == _t(10) and r["window_end"] == _t(30) for r in results)
+
+
+def test_nearby_during_offline_checks_only_start_of_open_window(source):
+    source._index.add_event(
+        LogEvent(ts=_t(10), kind="disconnect", player="Owner", player_id=None, text="disconnected", raw=None),
+        source="adm",
+    )
+    source._index.add_event(_roster_event(_t(10), "Looter", 7, x=100.0, z=100.0), source="zf")
+    source._index.commit()
+
+    results = source.nearby_during_offline("Owner", pos=(100.0, 100.0), radius=50.0)
+
+    assert [r["player"] for r in results] == ["Looter"]
+    assert results[0]["window_end"] is None
+
+
+def test_nearby_during_offline_excludes_windows_outside_ticket_range(source):
+    source._index.add_event(
+        LogEvent(ts=_t(10), kind="disconnect", player="Owner", player_id=None, text="disconnected", raw=None),
+        source="adm",
+    )
+    source._index.add_event(
+        LogEvent(ts=_t(30), kind="connect", player="Owner", player_id=None, text="connected", raw=None),
+        source="adm",
+    )
+    source._index.add_event(_roster_event(_t(10), "Looter", 7, x=100.0, z=100.0), source="zf")
+    source._index.commit()
+
+    results = source.nearby_during_offline(
+        "Owner", pos=(100.0, 100.0), radius=50.0, since=_t(1000), until=_t(2000)
+    )
+
+    assert results == []
+
+
 # --- container_access --------------------------------------------------------
 
 
@@ -155,6 +212,26 @@ def test_container_access_matches_by_vehicle_id_in_source_chain(source):
 
     assert len(matched) == 1
     assert matched[0].player == "[NAPA] Shama"
+
+
+def test_container_access_matches_by_root_class_fields_from_real_parser(source):
+    """Реальный zf.py (после m2) кладёт src_root_class/dst_root_class рядом с
+    чейнами -- запрос должен искать по корню, а не подстрокой по всей цепочке:
+    вложенный Bag2 внутри машины НЕ должен матчиться по запросу "Bag2", раз он
+    не корень ни одной из цепочек."""
+    event = _item_action(
+        _t(0), "Driver", 51,
+        source_chain=["Транспортное средство (Bastard_cj7_green)", "Одежда (Bag2)"],
+        dest_chain=["Персонаж", "Одежда (Bag2)"],
+        item="Bag2Item",
+    )
+    event.extra["src_root_class"] = "Bastard_cj7_green"
+    event.extra["dst_root_class"] = None
+    source._index.add_event(event, source="zf")
+    source._index.commit()
+
+    assert len(source.container_access("Bastard_cj7_green")) == 1
+    assert source.container_access("Bag2") == []
 
 
 def test_container_access_excludes_events_not_touching_the_vehicle(source):
